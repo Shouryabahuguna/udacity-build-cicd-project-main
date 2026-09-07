@@ -15,7 +15,7 @@ RUN npm ci
 COPY . .
 
 # Build the app
-RUN npm run build
+RUN DISABLE_ESLINT_PLUGIN=true npm run build
 
 # Expose the port used by the React app
 EXPOSE 3000

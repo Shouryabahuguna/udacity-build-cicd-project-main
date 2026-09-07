@@ -6,7 +6,7 @@ function MovieList({ onMovieClick }) {
   const [movies, setMovies] = useState([]);
 
   useEffect(() => {
-    axios.get('http://a42a20cafe6054347ac993453fdba15d-903599057.us-east-1.elb.amazonaws.com/movies').then((response) => {
+    axios.get('/proxy/5000/movies').then((response) => {
       setMovies(response.data.movies);
     });
   }, []);
