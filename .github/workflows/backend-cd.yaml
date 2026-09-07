@@ -1,71 +1,75 @@
-name: Frontend Continuous Deployment
+name: Backend Continuous Deployment
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'starter/frontend/**'
+      - 'starter/backend/**'
   workflow_dispatch:
 
 defaults:
   run:
-    working-directory: starter/frontend
+    working-directory: starter/backend
 
 jobs:
   lint:
-    name: Lint Frontend
+    name: Lint Backend
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup NodeJS
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 18
+          python-version: '3.10'
 
-      - name: Cache npm dependencies
+      - name: Install Pipenv
+        run: pip install pipenv
+
+      - name: Cache Pipenv virtualenv
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('starter/frontend/package-lock.json') }}
+          path: ~/.local/share/virtualenvs
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('starter/backend/Pipfile.lock') }}
           restore-keys: |
-            ${{ runner.os }}-node-
+            ${{ runner.os }}-pipenv-
 
       - name: Install dependencies
-        run: npm ci
+        run: pipenv install --dev
 
       - name: Run linter
-        run: npm run lint
+        run: pipenv run lint
 
   test:
-    name: Test Frontend
+    name: Test Backend
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup NodeJS
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 18
+          python-version: '3.10'
 
-      - name: Cache npm dependencies
+      - name: Install Pipenv
+        run: pip install pipenv
+
+      - name: Cache Pipenv virtualenv
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('starter/frontend/package-lock.json') }}
+          path: ~/.local/share/virtualenvs
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('starter/backend/Pipfile.lock') }}
           restore-keys: |
-            ${{ runner.os }}-node-
+            ${{ runner.os }}-pipenv-
 
       - name: Install dependencies
-        run: npm ci
+        run: pipenv install --dev
 
       - name: Run tests
-        run: npm run test -- --watchAll=false
-        env:
-          CI: true
+        run: pipenv run test
 
   build-and-deploy:
     name: Build, Push to ECR, and Deploy
@@ -74,7 +78,6 @@ jobs:
     env:
       AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
       EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME || 'cluster' }}
-      REACT_APP_MOVIE_API_URL: ${{ secrets.REACT_APP_MOVIE_API_URL || 'http://localhost:5000' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -93,11 +96,10 @@ jobs:
       - name: Build, tag, and push image to ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: mp-frontend
+          ECR_REPOSITORY: mp-backend
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build \
-            --build-arg REACT_APP_MOVIE_API_URL="${REACT_APP_MOVIE_API_URL}" \
             --tag "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
             --tag "$ECR_REGISTRY/$ECR_REPOSITORY:latest" .
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
@@ -113,9 +115,9 @@ jobs:
       - name: Deploy to Kubernetes
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: mp-frontend
+          ECR_REPOSITORY: mp-backend
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd k8s
-          kustomize edit set image frontend="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          kustomize edit set image backend="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           kustomize build | kubectl apply -f -

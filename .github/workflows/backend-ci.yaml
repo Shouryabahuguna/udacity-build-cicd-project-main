@@ -5,60 +5,65 @@ on:
     branches:
       - main
     paths:
-      - "starter/backend/**"
-
+      - 'starter/backend/**'
   workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: starter/backend
 
 jobs:
   lint:
-    name: Backend Lint
+    name: Lint Backend
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: starter/backend
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
-          cache: pip
-          cache-dependency-path: starter/backend/Pipfile.lock
+          python-version: '3.10'
 
       - name: Install Pipenv
         run: pip install pipenv
+
+      - name: Cache Pipenv virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/virtualenvs
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('starter/backend/Pipfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pipenv-
 
       - name: Install dependencies
         run: pipenv install --dev
 
-      - name: Run lint
+      - name: Run linter
         run: pipenv run lint
 
   test:
-    name: Backend Test
+    name: Test Backend
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: starter/backend
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
-          cache: pip
-          cache-dependency-path: starter/backend/Pipfile.lock
+          python-version: '3.10'
 
       - name: Install Pipenv
         run: pip install pipenv
+
+      - name: Cache Pipenv virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/virtualenvs
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('starter/backend/Pipfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pipenv-
 
       - name: Install dependencies
         run: pipenv install --dev
@@ -67,14 +72,9 @@ jobs:
         run: pipenv run test
 
   build:
-    name: Backend Build
-    runs-on: ubuntu-latest
+    name: Build Backend Docker Image
     needs: [lint, test]
-
-    defaults:
-      run:
-        working-directory: starter/backend
-
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
