@@ -6,8 +6,11 @@ function MovieList({ onMovieClick }) {
   const [movies, setMovies] = useState([]);
 
   useEffect(() => {
-    axios.get(`${process.env.REACT_APP_MOVIE_API_URL}/movies`).then((response) => {
+    const backendUrl = "http://a42a20cafe6054347ac993453fdba15d-903599057.us-east-1.elb.amazonaws.com";
+    axios.get(`${backendUrl}/movies`).then((response) => {
       setMovies(response.data.movies);
+    }).catch((err) => {
+      console.error("Failed to fetch movies:", err);
     });
   }, []);
 
