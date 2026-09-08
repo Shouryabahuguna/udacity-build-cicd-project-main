@@ -1,39 +1,109 @@
 #!/bin/bash
 set -e
 
-echo "1. Applying aws-auth ConfigMap to link worker nodes..."
-cat << 'EOF' | kubectl apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: aws-auth
-  namespace: kube-system
-data:
-  mapRoles: |
-    - rolearn: arn:aws:iam::803525118502:role/udacity-node-group
-      username: system:node:{{EC2PrivateDNSName}}
-      groups:
-        - system:bootstrappers
-        - system:nodes
-  mapUsers: |
-    - userarn: arn:aws:iam::803525118502:user/github-action-user
-      username: github-action-role
-      groups:
-        - system:masters
+echo "=== 1. Updating .github/workflows/backend-cd.yaml ==="
+cat << 'EOF' > .github/workflows/backend-cd.yaml
+name: Backend Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'starter/backend/**'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: starter/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run linter
+        run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: starter/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm run test
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    defaults:
+      run:
+        working-directory: starter/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push Backend Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: mp-backend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Setup Kubeconfig
+        run: |
+          aws eks update-kubeconfig --name cluster --region ${{ secrets.AWS_REGION }}
+
+      - name: Deploy Backend to EKS
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: mp-backend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd k8s
+          sed -i "s|IMAGE_PLACEHOLDER|$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" deployment.yaml
+          kubectl apply -f deployment.yaml
+          kubectl apply -f service.yaml
+          kubectl rollout status deployment/backend --timeout=180s
 EOF
 
-echo ""
-echo "2. Waiting 10 seconds for node registration..."
-sleep 10
+echo "=== 2. Staging, committing and pushing to GitHub ==="
+git add .github/workflows/
+git commit -m "fix: use npm install instead of npm ci in backend-cd" || true
+git push origin main
 
-echo ""
-echo "=========================================="
-echo ">> KUBECTL GET NODES <<"
-echo "=========================================="
-kubectl get nodes
-
-echo ""
-echo "=========================================="
-echo ">> KUBECTL GET PODS -O WIDE <<"
-echo "=========================================="
-kubectl get pods -o wide
+echo "=== DONE! Check GitHub Actions tab now ==="
