@@ -110,7 +110,7 @@ jobs:
       - name: Deploy Frontend to EKS
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: mp-frontend
+          ECR_REPOSITORY: frontend
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd k8s
