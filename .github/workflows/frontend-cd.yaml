@@ -15,9 +15,13 @@ jobs:
         working-directory: starter/frontend
     steps:
       - uses: actions/checkout@v3
+
       - uses: actions/setup-node@v3
         with:
           node-version: 16
+          cache: 'npm'
+          cache-dependency-path: starter/frontend/package-lock.json
+
       - run: npm ci
       - run: npm run lint
 
@@ -28,9 +32,13 @@ jobs:
         working-directory: starter/frontend
     steps:
       - uses: actions/checkout@v3
+
       - uses: actions/setup-node@v3
         with:
           node-version: 16
+          cache: 'npm'
+          cache-dependency-path: starter/frontend/package-lock.json
+
       - run: npm ci
       - run: CI=true npm run test
 
@@ -55,12 +63,37 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Setup Kubeconfig & Fetch Backend LB URL
-        id: get-backend
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Setup Kubeconfig & Resolve Backend URL
+        id: resolve-backend
         run: |
           aws eks update-kubeconfig --name cluster --region ${{ secrets.AWS_REGION }}
-          BACKEND_HOST=$(kubectl get svc backend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "BACKEND_URL=http://$BACKEND_HOST" >> $GITHUB_ENV
+
+          # Wait up to 60s for backend LoadBalancer hostname if available
+          BACKEND_HOST=""
+          for i in {1..12}; do
+            BACKEND_HOST=$(kubectl get svc backend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            if [ -n "$BACKEND_HOST" ]; then
+              echo "Found Backend Host: $BACKEND_HOST"
+              break
+            fi
+            echo "Waiting for Backend LoadBalancer hostname... ($i/12)"
+            sleep 5
+          done
+
+          # Check service port for backend
+          if [ -n "$BACKEND_HOST" ]; then
+            BACKEND_PORT=$(kubectl get svc backend -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo "5000")
+            if [ "$BACKEND_PORT" = "80" ]; then
+              echo "BACKEND_URL=http://$BACKEND_HOST" >> $GITHUB_ENV
+            else
+              echo "BACKEND_URL=http://$BACKEND_HOST:$BACKEND_PORT" >> $GITHUB_ENV
+            fi
+          else
+            echo "BACKEND_URL=http://localhost:5000" >> $GITHUB_ENV
+          fi
 
       - name: Build, tag, and push Frontend Docker image
         env:
@@ -68,7 +101,7 @@ jobs:
           ECR_REPOSITORY: mp-frontend
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build --build-arg REACT_APP_MOVIE_API_URL=${{ env.BACKEND_URL }} \
+          docker build --build-arg REACT_APP_MOVIE_API_URL="${{ env.BACKEND_URL }}" \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
@@ -81,7 +114,6 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd k8s
-          sed -i "s|IMAGE_PLACEHOLDER|$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" deployment.yaml
-          kubectl apply -f deployment.yaml
-          kubectl apply -f service.yaml
+          kustomize edit set image frontend=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          kustomize build | kubectl apply -f -
           kubectl rollout status deployment/frontend --timeout=180s
